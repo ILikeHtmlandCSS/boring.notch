@@ -65,14 +65,23 @@ final class ClockActivityManager: ObservableObject {
     }
 
     private func loadDomain(named name: String) -> [String: Any] {
+        synchronizeDomain(named: name)
         if let defaults = UserDefaults(suiteName: name) {
             let representation = defaults.dictionaryRepresentation()
             if !representation.isEmpty {
-                return representation
+                return decodePlistData(in: representation)
             }
         }
 
-        return UserDefaults.standard.persistentDomain(forName: name) ?? [:]
+        var merged = UserDefaults.standard.persistentDomain(forName: name) ?? [:]
+        merged.merge(loadDomainWithPreferences(name, user: kCFPreferencesCurrentUser, host: kCFPreferencesCurrentHost)) { _, new in
+            new
+        }
+        merged.merge(loadDomainWithPreferences(name, user: kCFPreferencesAnyUser, host: kCFPreferencesAnyHost)) { _, new in
+            new
+        }
+
+        return decodePlistData(in: merged)
     }
 
     private func parseTimerActivity(from domain: [String: Any]) -> ClockActivity? {
@@ -87,7 +96,7 @@ final class ClockActivityManager: ObservableObject {
         ]
 
         for source in timerSources {
-            if let activity = parseTimerSource(source) {
+            if let activity = parseTimerSource(normalizeSource(source)) {
                 return activity
             }
         }
@@ -106,7 +115,7 @@ final class ClockActivityManager: ObservableObject {
         ]
 
         for source in stopwatchSources {
-            if let activity = parseStopwatchSource(source) {
+            if let activity = parseStopwatchSource(normalizeSource(source)) {
                 return activity
             }
         }
@@ -264,6 +273,9 @@ final class ClockActivityManager: ObservableObject {
             if let number = dict[key] as? NSNumber {
                 return number.boolValue
             }
+            if let number = dict[key] as? Int {
+                return number != 0
+            }
             if let string = dict[key] as? String {
                 let normalized = string.lowercased()
                 if ["true", "yes", "1"].contains(normalized) {
@@ -331,5 +343,68 @@ final class ClockActivityManager: ObservableObject {
             return Date(timeIntervalSince1970: interval)
         }
         return Date(timeIntervalSinceReferenceDate: interval)
+    }
+
+    private func normalizeSource(_ source: Any?) -> Any? {
+        guard let source else { return nil }
+
+        if let data = source as? Data {
+            return decodePlist(from: data)
+        }
+
+        if let dict = source as? [String: Any] {
+            return decodePlistData(in: dict)
+        }
+
+        if let array = source as? [Any] {
+            return array.compactMap { element in
+                normalizeSource(element) ?? element
+            }
+        }
+
+        return source
+    }
+
+    private func decodePlistData(in dict: [String: Any]) -> [String: Any] {
+        var decoded: [String: Any] = [:]
+        decoded.reserveCapacity(dict.count)
+        for (key, value) in dict {
+            if let data = value as? Data, let plist = decodePlist(from: data) {
+                decoded[key] = plist
+            } else {
+                decoded[key] = value
+            }
+        }
+        return decoded
+    }
+
+    private func decodePlist(from data: Data) -> Any? {
+        return try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+    }
+
+    private func synchronizeDomain(named name: String) {
+        CFPreferencesAppSynchronize(name as CFString)
+    }
+
+    private func loadDomainWithPreferences(
+        _ name: String,
+        user: CFString,
+        host: CFString
+    ) -> [String: Any] {
+        let domain = name as CFString
+        guard let keys = CFPreferencesCopyKeyList(domain, user, host) as? [String] else {
+            return [:]
+        }
+
+        var values: [String: Any] = [:]
+        values.reserveCapacity(keys.count)
+
+        for key in keys {
+            if let value = CFPreferencesCopyValue(key as CFString, domain, user, host) {
+                values[key] = value
+            }
+        }
+
+        return values
     }
 }
