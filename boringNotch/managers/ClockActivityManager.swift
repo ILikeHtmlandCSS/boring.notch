@@ -61,6 +61,14 @@ final class ClockActivityManager: ObservableObject {
             return stopwatchActivity
         }
 
+        let deepActivities = domainData.flatMap { parseDeepActivities(from: $0) }
+        if let timerActivity = deepActivities.first(where: { $0.kind == .timer }) {
+            return timerActivity
+        }
+        if let stopwatchActivity = deepActivities.first(where: { $0.kind == .stopwatch }) {
+            return stopwatchActivity
+        }
+
         return nil
     }
 
@@ -121,6 +129,40 @@ final class ClockActivityManager: ObservableObject {
         }
 
         return nil
+    }
+
+    private func parseDeepActivities(from domain: [String: Any]) -> [ClockActivity] {
+        var activities: [ClockActivity] = []
+        let normalized = decodePlistData(in: domain)
+        collectActivities(from: normalized, into: &activities)
+        return activities
+    }
+
+    private func collectActivities(from source: Any, into activities: inout [ClockActivity]) {
+        if let data = source as? Data, let decoded = decodePlist(from: data) {
+            collectActivities(from: decoded, into: &activities)
+            return
+        }
+
+        if let dict = source as? [String: Any] {
+            if let timer = parseTimerDictionary(dict) {
+                activities.append(timer)
+            }
+            if let stopwatch = parseStopwatchDictionary(dict) {
+                activities.append(stopwatch)
+            }
+
+            for value in dict.values {
+                collectActivities(from: value, into: &activities)
+            }
+            return
+        }
+
+        if let array = source as? [Any] {
+            for entry in array {
+                collectActivities(from: entry, into: &activities)
+            }
+        }
     }
 
     private func parseTimerSource(_ source: Any?) -> ClockActivity? {
