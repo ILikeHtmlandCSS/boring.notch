@@ -20,6 +20,7 @@ struct ContentView: View {
 
     @ObservedObject var coordinator = BoringViewCoordinator.shared
     @ObservedObject var musicManager = MusicManager.shared
+    @ObservedObject var clockManager = ClockActivityManager.shared
     @ObservedObject var batteryModel = BatteryStatusViewModel.shared
     @ObservedObject var brightnessManager = BrightnessManager.shared
     @ObservedObject var volumeManager = VolumeManager.shared
@@ -68,6 +69,11 @@ struct ContentView: View {
         } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
             && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
+        {
+            chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
+        } else if !coordinator.expandingView.show && vm.notchState == .closed
+            && clockManager.activity?.isRunning == true && coordinator.clockLiveActivityEnabled
+            && !vm.hideOnClosed
         {
             chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
         } else if !coordinator.expandingView.show && vm.notchState == .closed
@@ -287,6 +293,11 @@ struct ContentView: View {
                               .transition(.opacity)
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
                           MusicLiveActivity()
+                              .frame(alignment: .center)
+                      } else if !coordinator.expandingView.show && vm.notchState == .closed
+                          && clockManager.activity?.isRunning == true && coordinator.clockLiveActivityEnabled
+                          && !vm.hideOnClosed {
+                          ClockLiveActivity()
                               .frame(alignment: .center)
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
                           BoringFaceAnimation()
@@ -606,6 +617,44 @@ struct ContentView: View {
                 haptics.toggle()
             }
         }
+    }
+
+    @ViewBuilder
+    func ClockLiveActivity() -> some View {
+        if let activity = clockManager.activity {
+            HStack(spacing: 10) {
+                Image(systemName: activity.kind == .timer ? "timer" : "stopwatch")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: max(0, vm.effectiveClosedNotchHeight - 12))
+
+                Rectangle()
+                    .fill(.black)
+                    .frame(width: vm.closedNotchSize.width - 20)
+                    .overlay(
+                        HStack {
+                            Text(activity.title)
+                                .foregroundStyle(.gray)
+                                .lineLimit(1)
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Text(formattedClockTime(activity.time))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                    )
+            }
+            .frame(height: vm.effectiveClosedNotchHeight, alignment: .center)
+        }
+    }
+
+    private func formattedClockTime(_ interval: TimeInterval) -> String {
+        let clamped = max(0, interval)
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = clamped >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
+        formatter.zeroFormattingBehavior = .pad
+        return formatter.string(from: clamped) ?? "00:00"
     }
 }
 
